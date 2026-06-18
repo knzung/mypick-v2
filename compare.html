@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyPick — 사진 비교</title>
+  <!-- Tailwind CSS 적용 (개발 속도 및 유지보수 극대화) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap');
+    body { font-family: 'Pretendard', -apple-system, sans-serif; }
+    /* 가로 스크롤바 숨기기 */
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden text-neutral-900 select-none">
+
+  <!-- 상단 헤더 -->
+  <header class="bg-white flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0">
+    <div class="flex items-center gap-3">
+      <i class="ti ti-arrow-left text-xl cursor-pointer hover:opacity-70 transition" onclick="history.back()"></i>
+      <h1 class="text-base font-semibold">사진 비교</h1>
+    </div>
+    <span class="text-xs text-gray-400 font-medium bg-gray-100 px-2.5 py-1 rounded-full" id="cmp-counter">2장 비교 중</span>
+  </header>
+
+  <!-- 썸네일 스트립 (가로 스크롤) -->
+  <div class="bg-white px-4 py-3 border-b border-gray-200 flex gap-2 overflow-x-auto hide-scrollbar shrink-0" id="cmp-strip">
+    <!-- JS로 렌더링 됨 -->
+  </div>
+
+  <!-- 메인 사진 비교 그리드 -->
+  <div class="flex-1 grid grid-cols-2 gap-0.5 bg-gray-200 relative" id="cmp-grid">
+    <!-- JS로 렌더링 됨 -->
+  </div>
+
+  <!-- 액션 영역 (각 사진별 상태 변경) -->
+  <div class="bg-white border-t border-gray-200 pt-3 pb-2 px-4 shrink-0" id="cmp-action-area">
+    <!-- JS로 렌더링 됨 -->
+  </div>
+
+  <!-- 💸 핵심: 업셀링(추가 결제) 유도 하단 바 -->
+  <div class="bg-white px-4 pt-2 pb-6 shrink-0 flex flex-col gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.03)]">
+    
+    <!-- 추가금 실시간 계산기 -->
+    <div class="flex justify-between items-end px-1">
+      <div>
+        <p class="text-[11px] text-gray-500 font-medium">기본 제공 20장</p>
+        <p class="text-sm font-semibold">총 <span id="total-selected" class="text-black text-base">0</span>장 선택</p>
+      </div>
+      <div class="text-right transition-opacity duration-300" id="extra-price-container">
+        <p class="text-[11px] text-gray-500 font-medium">추가 금액 (장당 30,000원)</p>
+        <p class="text-lg font-bold text-red-500 tracking-tight" id="extra-price">+0원</p>
+      </div>
+    </div>
+
+    <!-- 버튼 그룹 -->
+    <div class="flex gap-2.5">
+      <button class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl py-3.5 text-[13px] font-semibold transition" onclick="location.href='01_gallery.html'">갤러리로</button>
+      <button class="flex-[2] bg-neutral-900 hover:bg-black text-white rounded-xl py-3.5 text-[13px] font-semibold transition shadow-md" onclick="alert('데이터베이스 저장 로직이 들어갈 자리입니다.')">선택 적용하기</button>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // 가상의 사진 데이터 (기본 20장 제한을 넘기기 위해 임의로 22장 세팅)
+  const totalPhotos = 22;
+  const grays = [['#e8e6e0','#dbd8d1'],['#e0ddd6','#d8d5ce'],['#e5e3dc','#dedad3'],['#e9e7e0','#e2dfd8']];
+  
+  // 상태 정보 정의
+  const stateInfo = {
+    none: { label: '미선택', activeClass: 'bg-transparent border border-gray-200 text-gray-500', inactiveClass: 'bg-transparent border border-gray-200 text-gray-300' },
+    selected: { label: '선택', activeClass: 'bg-neutral-900 border-neutral-900 text-white', inactiveClass: 'bg-transparent border border-gray-200 text-gray-300' },
+    hold: { label: '보류', activeClass: 'bg-gray-200 border-gray-200 text-gray-700', inactiveClass: 'bg-transparent border border-gray-200 text-gray-300' }
+  };
+
+  let photos = Array.from({length: totalPhotos}, (_, i) => ({
+    id: i, 
+    label: String(i + 1).padStart(2, '0'), 
+    state: (i < 19) ? 'selected' : 'none', // 업셀링 테스트를 위해 19장 미리 선택됨
+    colors: grays[i % grays.length]
+  }));
+  
+  let comparing = [19, 20]; // 현재 비교 중인 인덱스
+  let stripSelected = new Set([19, 20]);
+
+  // 비즈니스 로직 (업셀링 계산)
+  const BASE_LIMIT = 20;
+  const EXTRA_PRICE_PER_PHOTO = 30000;
+
+  function updateUpsellUI() {
+    const selectedCount = photos.filter(p => p.state === 'selected').length;
+    document.getElementById('total-selected').innerText = selectedCount;
+    
+    const extraCount = Math.max(0, selectedCount - BASE_LIMIT);
+    const extraPrice = extraCount * EXTRA_PRICE_PER_PHOTO;
+    
+    const priceEl = document.getElementById('extra-price');
+    const containerEl = document.getElementById('extra-price-container');
+    
+    if (extraPrice > 0) {
+      priceEl.innerText = `+${extraPrice.toLocaleString()}원`;
+      priceEl.classList.remove('text-gray-400');
+      priceEl.classList.add('text-red-500');
+    } else {
+      priceEl.innerText = '+0원';
+      priceEl.classList.remove('text-red-500');
+      priceEl.classList.add('text-gray-400');
+    }
+  }
+
+  function renderStrip() {
+    const strip = document.getElementById('cmp-strip');
+    strip.innerHTML = '';
+    photos.forEach((p, i) => {
+      const active = stripSelected.has(i);
+      const el = document.createElement('div');
+      el.className = `shrink-0 w-12 h-12 rounded-lg cursor-pointer relative transition-all border-2 ${active ? 'border-neutral-900 scale-105' : 'border-transparent'}`;
+      el.style.background = p.colors[0];
+      
+      el.innerHTML = `<span class="absolute bottom-1 left-1.5 text-[9px] text-black/60 font-medium">${p.label}</span>`;
+      if (p.state === 'selected') {
+        el.innerHTML += `<div class="absolute -top-1 -right-1 w-4 h-4 bg-neutral-900 rounded-full flex items-center justify-center text-white text-[8px]">✓</div>`;
+      }
+      
+      el.onclick = () => {
+        if (stripSelected.has(i)) {
+          if (stripSelected.size > 1) stripSelected.delete(i);
+        } else {
+          if (stripSelected.size >= 2) {
+            const first = [...stripSelected][0];
+            stripSelected.delete(first);
+          }
+          stripSelected.add(i);
+        }
+        comparing = [...stripSelected];
+        renderAll();
+      };
+      strip.appendChild(el);
+    });
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('cmp-grid');
+    grid.innerHTML = '';
+    
+    // 중앙 VS 아이콘
+    const center = document.createElement('div');
+    center.className = 'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-white rounded-full border shadow-sm flex items-center justify-center pointer-events-none z-10';
+    center.innerHTML = '<i class="ti ti-arrows-horizontal text-sm text-gray-400"></i>';
+    grid.appendChild(center);
+
+    comparing.forEach(idx => {
+      const p = photos[idx];
+      const cell = document.createElement('div');
+      cell.className = 'flex flex-col justify-between p-3 cursor-pointer relative';
+      cell.style.background = p.colors[0];
+      
+      let badgeHTML = p.state !== 'none' 
+        ? `<span class="${p.state === 'selected' ? 'bg-neutral-900 text-white' : 'bg-white/80 text-gray-700'} rounded-full px-2 py-0.5 text-[10px] font-semibold">${stateInfo[p.state].label}</span>`
+        : `<span></span>`;
+
+      cell.innerHTML = `
+        <div class="flex justify-between items-start">
+          <span class="bg-white/80 rounded-full px-2 py-0.5 text-[10px] font-semibold">${p.label}</span>
+          ${badgeHTML}
+        </div>
+      `;
+      // 사진 탭 시 상태 변경 로직
+      cell.onclick = () => {
+        const order = ['none', 'selected', 'hold'];
+        p.state = order[(order.indexOf(p.state) + 1) % 3];
+        renderAll();
+      };
+      grid.appendChild(cell);
+    });
+  }
+
+  function renderActionArea() {
+    const area = document.getElementById('cmp-action-area');
+    area.innerHTML = '';
+    
+    const row = document.createElement('div');
+    row.className = 'flex gap-3 items-center';
+    
+    comparing.forEach((idx, ci) => {
+      const p = photos[idx];
+      const wrap = document.createElement('div');
+      wrap.className = 'flex-1 flex flex-col gap-1.5';
+      
+      const btnRow = document.createElement('div');
+      btnRow.className = 'flex gap-1.5';
+      
+      ['none', 'hold', 'selected'].forEach(s => {
+        const active = p.state === s;
+        const btn = document.createElement('button');
+        btn.className = `flex-1 py-2 text-[11px] font-medium rounded-lg transition-colors ${active ? stateInfo[s].activeClass : stateInfo[s].inactiveClass}`;
+        btn.textContent = stateInfo[s].label;
+        btn.onclick = () => { p.state = s; renderAll(); };
+        btnRow.appendChild(btn);
+      });
+      
+      wrap.appendChild(btnRow);
+      row.appendChild(wrap);
+      
+      if(ci === 0) {
+        const div = document.createElement('div');
+        div.className = 'w-px h-8 bg-gray-200';
+        row.appendChild(div);
+      }
+    });
+    area.appendChild(row);
+  }
+
+  function renderAll() {
+    renderStrip();
+    renderGrid();
+    renderActionArea();
+    updateUpsellUI(); // 렌더링될 때마다 추가금 다시 계산
+  }
+
+  // 초기 실행
+  renderAll();
+})();
+</script>
+</body>
+</html>
